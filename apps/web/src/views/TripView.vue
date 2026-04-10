@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import {computed, ref, watch, onBeforeUnmount, nextTick} from 'vue';
+import {useRoute} from 'vue-router';
 import {
   NButton,
   NCard,
@@ -15,9 +15,17 @@ import {
   NTabPane,
   useMessage,
 } from 'naive-ui';
-import { apiFetch, setSessionToken } from '@/api/client';
-import { useTripSocket } from '@/composables/useTripSocket';
-import { formatRub } from '@/utils/money';
+import {apiFetch, setSessionToken} from '@/api/client';
+import QrScanner from 'qr-scanner';
+// Vite: load worker as URL
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import qrWorkerUrl from 'qr-scanner/qr-scanner-worker.min.js?url';
+// Assign worker path for qr-scanner
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(QrScanner as any).WORKER_PATH = qrWorkerUrl;
+import {useTripSocket} from '@/composables/useTripSocket';
+import {formatRub} from '@/utils/money';
 
 const props = defineProps<{ slug: string }>();
 const route = useRoute();
@@ -68,19 +76,19 @@ const refreshing = ref(false);
 const tabKey = computed(() => `splich_active_tab:${slug.value}`);
 const activeTab = ref('p3');
 watch(
-  tabKey,
-  (k) => {
-    activeTab.value = sessionStorage.getItem(k) ?? 'p3';
-  },
-  { immediate: true },
+    tabKey,
+    (k) => {
+      activeTab.value = sessionStorage.getItem(k) ?? 'p3';
+    },
+    {immediate: true},
 );
 watch(
-  activeTab,
-  (v) => {
-    if (!tabKey.value) return;
-    sessionStorage.setItem(tabKey.value, v);
-  },
-  { flush: 'post' },
+    activeTab,
+    (v) => {
+      if (!tabKey.value) return;
+      sessionStorage.setItem(tabKey.value, v);
+    },
+    {flush: 'post'},
 );
 
 const joinName = ref('');
@@ -103,29 +111,29 @@ async function load() {
   }
 }
 
-watch(slug, load, { immediate: true });
+watch(slug, load, {immediate: true});
 
 useTripSocket(
-  () => state.value?.trip.id,
-  () => {
-    void load();
-  },
+    () => state.value?.trip.id,
+    () => {
+      void load();
+    },
 );
 
 async function doJoin() {
   try {
     const res = await apiFetch<{ sessionToken: string }>(
-      `/api/trips/${encodeURIComponent(slug.value)}/join`,
-      {
-        method: 'POST',
-        json: {
-          name: joinName.value,
-          password: joinPassword.value,
-          phone: joinPhone.value,
-          bank: joinBank.value,
-          joinPassword: joinRoomPass.value || undefined,
+        `/api/trips/${encodeURIComponent(slug.value)}/join`,
+        {
+          method: 'POST',
+          json: {
+            name: joinName.value,
+            password: joinPassword.value,
+            phone: joinPhone.value,
+            bank: joinBank.value,
+            joinPassword: joinRoomPass.value || undefined,
+          },
         },
-      },
     );
     setSessionToken(res.sessionToken);
     message.success('Вы в комнате');
@@ -143,6 +151,115 @@ const scan = ref({
   total: '',
   date: '',
   time: '',
+});
+
+// QR scanning state
+const scanning = ref(false);
+const qrVideo = ref<HTMLVideoElement | null>(null);
+let qrScanner: QrScanner | null = null;
+const qrFileInput = ref<HTMLInputElement | null>(null);
+
+function applyParsed(p: { fn?: string; fd?: string; fp?: string; s?: string; t?: string }) {
+  if (p.fn) scan.value.fn = p.fn.trim();
+  if (p.fd) scan.value.fd = p.fd.trim();
+  if (p.fp) scan.value.fp = p.fp.trim();
+  if (p.s) {
+    const num = Number(String(p.s).replace(',', '.'));
+    if (!Number.isNaN(num)) scan.value.total = num.toFixed(2);
+  }
+  if (p.t) {
+    // Expect formats like 20260406T201700, 20260406T201700Z, or 20260406T201700+0300
+    const m = String(p.t).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+    if (m) {
+      const [_, y, mo, d, h, mi, s] = m;
+      scan.value.date = `${y}-${mo}-${d}`;
+      scan.value.time = `${h}:${mi}`;
+    }
+  }
+}
+
+function parseQrPayload(text: string) {
+  // Parse key=value pairs separated by &. Example: t=20260406T201700&s=52355.66&fn=...&i=...&fp=...&n=1
+  const out: Record<string, string> = {};
+  const parts = text.trim().replace(/^\?/, '').split('&');
+  for (const p of parts) {
+    const [k, v] = p.split('=');
+    if (!k) continue;
+    out[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+  }
+  const map = { fn: out.fn, fd: out.i, fp: out.fp, s: out.s, t: out.t };
+  applyParsed(map);
+}
+
+async function onQrDetected(res: { data: string } | string) {
+  try {
+    const data = typeof res === 'string' ? res : res.data;
+    if (!data) return;
+    parseQrPayload(data);
+    message.success('QR распознан — поля заполнены');
+  } catch (e) {
+    message.error('Не удалось распознать QR');
+  } finally {
+    // Stop after first successful detection to avoid duplicates
+    await stopCameraScan();
+  }
+}
+
+async function startCameraScan() {
+  try {
+    await nextTick();
+    if (!qrVideo.value) return;
+    await stopCameraScan();
+    qrScanner = new QrScanner(qrVideo.value, (r) => void onQrDetected(r as unknown as { data: string }), {
+      preferredCamera: 'environment',
+      returnDetailedScanResult: true,
+      highlightScanRegion: true,
+      highlightCodeOutline: true,
+    });
+    await qrScanner.start();
+    scanning.value = true;
+  } catch (e) {
+    message.error('Нет доступа к камере или она недоступна');
+  }
+}
+
+async function stopCameraScan() {
+  try {
+    if (qrScanner) {
+      await qrScanner.stop();
+      qrScanner.destroy();
+      qrScanner = null;
+    }
+  } finally {
+    scanning.value = false;
+  }
+}
+
+function triggerFilePick() {
+  qrFileInput.value?.click();
+}
+
+async function onFileChange(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files && input.files[0];
+  if (!file) return;
+  try {
+    const res = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
+    await onQrDetected(res as unknown as { data: string });
+  } catch (e) {
+    message.error('QR на изображении не найден');
+  } finally {
+    // reset input to allow re-selecting the same file
+    if (input) input.value = '';
+  }
+}
+
+watch(showScan, async (v) => {
+  if (!v) await stopCameraScan();
+});
+
+onBeforeUnmount(async () => {
+  await stopCameraScan();
 });
 
 async function submitScan() {
@@ -169,7 +286,7 @@ async function submitManual() {
   try {
     await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/receipts/manual`, {
       method: 'POST',
-      json: { name: manualName.value, priceRub: pr },
+      json: {name: manualName.value, priceRub: pr},
     });
     message.success('Позиция добавлена');
     showManual.value = false;
@@ -215,15 +332,15 @@ const filteredProducts = computed(() => {
 });
 
 const receiptOptions = computed(() =>
-  (state.value?.receipts ?? []).map((r) => ({
-    label: `${r.institution} — ${formatRub(r.officialTotalKopecks)}`,
-    value: r.id,
-  })),
+    (state.value?.receipts ?? []).map((r) => ({
+      label: `${r.institution} — ${formatRub(r.officialTotalKopecks)}`,
+      value: r.id,
+    })),
 );
 
 async function finishTrip() {
   try {
-    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/finish`, { method: 'POST' });
+    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/finish`, {method: 'POST'});
     message.success('Поездка закрыта');
     await load();
   } catch (e) {
@@ -246,10 +363,10 @@ async function loadSettlement() {
 }
 
 watch(
-  () => state.value?.trip.finishedAt,
-  (v) => {
-    if (v) void loadSettlement();
-  },
+    () => state.value?.trip.finishedAt,
+    (v) => {
+      if (v) void loadSettlement();
+    },
 );
 
 const expandedReceipt = ref<string | null>(null);
@@ -303,7 +420,7 @@ async function saveEditLine() {
   try {
     await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/line-items/${id}`, {
       method: 'PATCH',
-      json: { name: editLineName.value, priceKopecks },
+      json: {name: editLineName.value, priceKopecks},
     });
     message.success('Сохранено');
     closeEditLine();
@@ -329,23 +446,23 @@ async function deleteLine() {
 }
 
 const shareUrl = computed(() =>
-  typeof location !== 'undefined' ? `${location.origin}/t/${slug.value}` : '',
+    typeof location !== 'undefined' ? `${location.origin}/t/${slug.value}` : '',
 );
 
 const renameTrip = ref('');
 watch(
-  () => state.value?.trip.name,
-  (n) => {
-    if (n) renameTrip.value = n;
-  },
-  { immediate: true },
+    () => state.value?.trip.name,
+    (n) => {
+      if (n) renameTrip.value = n;
+    },
+    {immediate: true},
 );
 
 async function saveTripName() {
   try {
     await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}`, {
       method: 'PATCH',
-      json: { name: renameTrip.value },
+      json: {name: renameTrip.value},
     });
     message.success('Сохранено');
     await load();
@@ -370,7 +487,7 @@ async function setForced(lineId: string, v: boolean) {
   try {
     await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/line-items/${lineId}`, {
       method: 'PATCH',
-      json: { forcedForAll: v },
+      json: {forcedForAll: v},
     });
     await load();
   } catch (e) {
@@ -396,27 +513,27 @@ async function copyShareUrl() {
     <NCard title="Вход в комнату" class="glass">
       <NForm label-placement="top">
         <NFormItem label="Имя" :show-feedback="false">
-          <NInput v-model:value="joinName" />
+          <NInput v-model:value="joinName"/>
         </NFormItem>
         <NFormItem
-          label="Пароль участника (личный)"
-          :show-feedback="false"
-          tooltip="Это ваш личный пароль в этой поездке. По телефону + этому паролю вы сможете войти с другого устройства."
+            label="Пароль участника (личный)"
+            :show-feedback="false"
+            tooltip="Это ваш личный пароль в этой поездке. По телефону + этому паролю вы сможете войти с другого устройства."
         >
-          <NInput v-model:value="joinPassword" type="password" show-password-on="click" />
+          <NInput v-model:value="joinPassword" type="password" show-password-on="click"/>
         </NFormItem>
         <NFormItem label="Телефон" :show-feedback="false" tooltip="По телефону ищем вашу запись в этой комнате.">
-          <NInput v-model:value="joinPhone" />
+          <NInput v-model:value="joinPhone"/>
         </NFormItem>
         <NFormItem label="Банк" :show-feedback="false" tooltip="Показывается в финале для переводов.">
-          <NInput v-model:value="joinBank" />
+          <NInput v-model:value="joinBank"/>
         </NFormItem>
         <NFormItem
-          label="Пароль комнаты (если задан)"
-          :show-feedback="false"
-          tooltip="Общий пароль поездки. Нужен только если админ поставил защиту."
+            label="Пароль комнаты (если задан)"
+            :show-feedback="false"
+            tooltip="Общий пароль поездки. Нужен только если админ поставил защиту."
         >
-          <NInput v-model:value="joinRoomPass" type="password" />
+          <NInput v-model:value="joinRoomPass" type="password"/>
         </NFormItem>
         <NButton type="primary" @click="doJoin">Войти</NButton>
       </NForm>
@@ -471,33 +588,33 @@ async function copyShareUrl() {
       </NTabPane>
       <NTabPane name="p3" tab="Продукты">
         <div class="filters glass">
-          <NInput v-model:value="productSearch" placeholder="Поиск по товарам" clearable />
+          <NInput v-model:value="productSearch" placeholder="Поиск по товарам" clearable/>
           <NSpace style="margin-top: 10px" wrap>
-          <NCheckbox v-model:checked="hideSelected">Скрыть отмеченные мной</NCheckbox>
-          <NSelect
-            v-model:value="receiptFilter"
-            multiple
-            clearable
-            placeholder="Фильтр по чекам"
-            :options="receiptOptions"
-            style="min-width: 220px"
-          />
+            <NCheckbox v-model:checked="hideSelected">Скрыть отмеченные мной</NCheckbox>
+            <NSelect
+                v-model:value="receiptFilter"
+                multiple
+                clearable
+                placeholder="Фильтр по чекам"
+                :options="receiptOptions"
+                style="min-width: 220px"
+            />
           </NSpace>
         </div>
         <div v-for="li in filteredProducts" :key="li.id" class="prod-row">
           <NCheckbox
-            :checked="li.mySelected || li.forcedForAll"
-            :disabled="!!state.trip.finishedAt || li.forcedForAll"
-            @update:checked="() => toggleLine(li.id)"
+              :checked="li.mySelected || li.forcedForAll"
+              :disabled="!!state.trip.finishedAt || li.forcedForAll"
+              @update:checked="() => toggleLine(li.id)"
           />
           <span class="prod-name">{{ li.name }}</span>
           <span class="prod-meta">{{ formatRub(li.priceKopecks) }}</span>
           <span v-if="li.selectedCount > 0" class="cnt">✓ {{ li.selectedCount }}</span>
           <NButton
-            v-if="state.me?.isAdmin && !state.trip.finishedAt"
-            size="tiny"
-            quaternary
-            @click="setForced(li.id, !li.forcedForAll)"
+              v-if="state.me?.isAdmin && !state.trip.finishedAt"
+              size="tiny"
+              quaternary
+              @click="setForced(li.id, !li.forcedForAll)"
           >
             {{ li.forcedForAll ? 'разблок.' : 'всем' }}
           </NButton>
@@ -511,20 +628,20 @@ async function copyShareUrl() {
           <NButton size="small" @click="loadSettlement">Обновить матрицу</NButton>
           <table v-if="settlement" class="matrix">
             <thead>
-              <tr>
-                <th></th>
-                <th v-for="pid in settlement.participantIds" :key="pid">
-                  {{ settlement.names[pid] ?? pid }}
-                </th>
-              </tr>
+            <tr>
+              <th></th>
+              <th v-for="pid in settlement.participantIds" :key="pid">
+                {{ settlement.names[pid] ?? pid }}
+              </th>
+            </tr>
             </thead>
             <tbody>
-              <tr v-for="(rowId, i) in settlement.participantIds" :key="rowId">
-                <th>{{ settlement.names[rowId] ?? rowId }}</th>
-                <td v-for="(colId, j) in settlement.participantIds" :key="colId">
-                  {{ formatRub(settlement.kopecks[i]?.[j] ?? 0) }}
-                </td>
-              </tr>
+            <tr v-for="(rowId, i) in settlement.participantIds" :key="rowId">
+              <th>{{ settlement.names[rowId] ?? rowId }}</th>
+              <td v-for="(colId, j) in settlement.participantIds" :key="colId">
+                {{ formatRub(settlement.kopecks[i]?.[j] ?? 0) }}
+              </td>
+            </tr>
             </tbody>
           </table>
           <p v-if="settlement && state.me" class="muted" style="margin-top: 1rem">
@@ -536,53 +653,78 @@ async function copyShareUrl() {
       <NTabPane v-if="state.me?.isAdmin" name="p5" tab="Админ">
         <div class="glass admin">
           <p style="margin-top: 0">Ссылка: <code>{{ shareUrl }}</code></p>
-        <NForm label-placement="top" style="max-width: 360px; margin: 1rem 0">
-          <NFormItem label="Название поездки">
-            <NSpace>
-              <NInput v-model:value="renameTrip" />
-              <NButton @click="saveTripName">Сохранить</NButton>
-            </NSpace>
-          </NFormItem>
-        </NForm>
-        <ul v-if="!state.trip.finishedAt" class="list">
-          <li
-            v-for="p in (state?.participants ?? []).filter((x) => x.id !== state?.me?.participantId)"
-            :key="p.id"
-          >
-            {{ p.name }}
-            <NButton size="small" quaternary type="error" @click="removeParticipant(p.id)">Удалить</NButton>
-          </li>
-        </ul>
-        <NButton v-if="!state.trip.finishedAt" type="error" ghost @click="finishTrip">Завершить поездку</NButton>
+          <NForm label-placement="top" style="max-width: 360px; margin: 1rem 0">
+            <NFormItem label="Название поездки">
+              <NSpace>
+                <NInput v-model:value="renameTrip"/>
+                <NButton @click="saveTripName">Сохранить</NButton>
+              </NSpace>
+            </NFormItem>
+          </NForm>
+          <ul v-if="!state.trip.finishedAt" class="list">
+            <li
+                v-for="p in (state?.participants ?? []).filter((x) => x.id !== state?.me?.participantId)"
+                :key="p.id"
+            >
+              {{ p.name }}
+              <NButton size="small" quaternary type="error" @click="removeParticipant(p.id)">Удалить</NButton>
+            </li>
+          </ul>
+          <NButton v-if="!state.trip.finishedAt" type="error" ghost @click="finishTrip">Завершить поездку</NButton>
         </div>
       </NTabPane>
     </NTabs>
 
     <NModal v-model:show="showScan" preset="card" title="Данные из QR чека">
       <NForm label-placement="top">
-        <NFormItem label="ФН"><NInput v-model:value="scan.fn" /></NFormItem>
-        <NFormItem label="ФД"><NInput v-model:value="scan.fd" /></NFormItem>
-        <NFormItem label="ФП"><NInput v-model:value="scan.fp" /></NFormItem>
-        <NFormItem label="Сумма (как в чеке)"><NInput v-model:value="scan.total" placeholder="1250.00" /></NFormItem>
-        <NFormItem label="Дата"><NInput v-model:value="scan.date" placeholder="2025-03-03" /></NFormItem>
-        <NFormItem label="Время"><NInput v-model:value="scan.time" placeholder="13:00" /></NFormItem>
+        <NSpace style="margin-bottom: 10px" wrap>
+          <NButton secondary @click="startCameraScan" v-if="!scanning">Сканировать с камеры</NButton>
+          <NButton secondary type="warning" @click="stopCameraScan" v-else>Остановить камеру</NButton>
+          <NButton @click="triggerFilePick">Загрузить изображение</NButton>
+          <input ref="qrFileInput" type="file" accept="image/*" @change="onFileChange" style="display:none" />
+        </NSpace>
+        <div v-if="scanning" class="qr-preview">
+          <video ref="qrVideo" class="qr-video" muted playsinline></video>
+        </div>
+        <NFormItem label="ФН">
+          <NInput v-model:value="scan.fn"/>
+        </NFormItem>
+        <NFormItem label="ФД">
+          <NInput v-model:value="scan.fd"/>
+        </NFormItem>
+        <NFormItem label="ФП">
+          <NInput v-model:value="scan.fp"/>
+        </NFormItem>
+        <NFormItem label="Сумма (как в чеке)">
+          <NInput v-model:value="scan.total" placeholder="1250.00"/>
+        </NFormItem>
+        <NFormItem label="Дата">
+          <NInput v-model:value="scan.date" placeholder="2025-03-03"/>
+        </NFormItem>
+        <NFormItem label="Время">
+          <NInput v-model:value="scan.time" placeholder="13:00"/>
+        </NFormItem>
         <NButton type="primary" block @click="submitScan">Проверить и добавить</NButton>
       </NForm>
     </NModal>
 
     <NModal v-model:show="showManual" preset="card" title="Ручная позиция">
       <NForm label-placement="top">
-        <NFormItem label="Название"><NInput v-model:value="manualName" placeholder="Бензин" /></NFormItem>
-        <NFormItem label="Цена, ₽"><NInput v-model:value="manualPrice" placeholder="500" /></NFormItem>
+        <NFormItem label="Название">
+          <NInput v-model:value="manualName" placeholder="Бензин"/>
+        </NFormItem>
+        <NFormItem label="Цена, ₽">
+          <NInput v-model:value="manualPrice" placeholder="500"/>
+        </NFormItem>
         <NButton type="primary" block @click="submitManual">Добавить</NButton>
       </NForm>
     </NModal>
 
     <NModal
-      v-model:show="showEditLine"
-      preset="card"
-      title="Редактирование позиции"
-      @after-leave="closeEditLine"
+        v-model:show="showEditLine"
+        preset="card"
+        title="Редактирование позиции"
+        @after-leave="closeEditLine"
     >
       <template v-if="selectedLineItem && canEditSelectedLine">
         <div class="muted small" style="margin-bottom: 8px">
@@ -590,10 +732,10 @@ async function copyShareUrl() {
         </div>
         <NForm label-placement="top">
           <NFormItem label="Название">
-            <NInput v-model:value="editLineName" />
+            <NInput v-model:value="editLineName"/>
           </NFormItem>
           <NFormItem label="Цена, ₽">
-            <NInput v-model:value="editLinePriceRub" placeholder="100.00" />
+            <NInput v-model:value="editLinePriceRub" placeholder="100.00"/>
           </NFormItem>
           <NSpace justify="space-between">
             <NButton type="error" ghost @click="deleteLine">Удалить</NButton>
@@ -612,44 +754,53 @@ async function copyShareUrl() {
 .trip :deep(.n-tabs) {
   margin-top: 14px;
 }
+
 .trip :deep(.n-tabs .n-tabs-nav) {
   position: sticky;
   top: 10px;
   z-index: 10;
   backdrop-filter: blur(10px);
 }
+
 .trip :deep(.n-tabs .n-tabs-nav-scroll-content) {
   padding: 10px 12px;
 }
+
 .hdr {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px 16px 14px;
 }
+
 .kicker {
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
 .hdr-actions {
   display: flex;
   gap: 10px;
 }
+
 .hdr h1 {
   margin: 2px 0 4px;
   font-size: 20px;
   letter-spacing: -0.02em;
 }
+
 .list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
+
 .list li {
   padding: 0.6rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
+
 .badge {
   font-size: 0.75rem;
   background: rgba(255, 255, 255, 0.12);
@@ -658,15 +809,18 @@ async function copyShareUrl() {
   border-radius: 4px;
   margin-left: 0.35rem;
 }
+
 .small {
   font-size: 0.85rem;
 }
+
 .receipt {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   margin-bottom: 0.5rem;
   overflow: hidden;
 }
+
 .receipt-h {
   display: flex;
   justify-content: space-between;
@@ -674,6 +828,7 @@ async function copyShareUrl() {
   cursor: pointer;
   background: rgba(255, 255, 255, 0.06);
 }
+
 .receipt-body {
   margin: 0;
   padding: 10px 14px 14px;
@@ -681,6 +836,7 @@ async function copyShareUrl() {
   padding-left: 1.5rem;
   background: rgba(0, 0, 0, 0.14);
 }
+
 .li-btn {
   all: unset;
   cursor: pointer;
@@ -690,13 +846,16 @@ async function copyShareUrl() {
   width: 100%;
   padding: 6px 0;
 }
+
 .li-btn:hover {
   opacity: 0.92;
 }
+
 .filters {
   padding: 12px;
   margin-bottom: 10px;
 }
+
 .prod-row {
   display: grid;
   grid-template-columns: auto 1fr auto auto auto;
@@ -705,42 +864,66 @@ async function copyShareUrl() {
   padding: 10px 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
+
 .prod-name {
   font-size: 0.95rem;
 }
+
 .prod-meta {
   color: rgba(255, 255, 255, 0.76);
   font-size: 0.9rem;
 }
+
 .cnt {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.76);
 }
+
 .matrix {
   width: 100%;
   border-collapse: collapse;
   margin-top: 0.75rem;
   font-size: 0.85rem;
 }
+
 .matrix th,
 .matrix td {
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 0.35rem 0.5rem;
   text-align: right;
 }
+
 .matrix th:first-child,
 .matrix td:first-child {
   text-align: left;
 }
+
 .toolbar {
   margin-bottom: 0.75rem;
   padding: 10px 12px;
 }
+
 code {
   font-size: 0.85rem;
   word-break: break-all;
 }
+
 .admin {
   padding: 12px;
+}
+
+.qr-preview {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.qr-video {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  background: black;
 }
 </style>

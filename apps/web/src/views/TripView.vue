@@ -1,30 +1,28 @@
 <script setup lang="ts">
-import {computed, ref, watch, onBeforeUnmount, nextTick} from 'vue';
+import {computed, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {
   NButton,
-  NCard,
   NCheckbox,
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NSelect,
   NSpace,
   NTabs,
   NTabPane,
   NIcon,
-  NImage,
-  NInputGroupLabel,
-  NInputGroup,
   useMessage,
 } from 'naive-ui';
-import {apiFetch, setSessionToken} from '@/api/client';
-import QrScanner from 'qr-scanner';
+import TripJoinAuth from '@/components/trip/TripJoinAuth.vue';
+import ScanReceiptModal from '@/components/trip/ScanReceiptModal.vue';
+import ManualPositionModal from '@/components/trip/ManualPositionModal.vue';
+import EditLineModal from '@/components/trip/EditLineModal.vue';
+import RoomQrCodeModal from '@/components/trip/RoomQrCodeModal.vue';
+import {apiFetch} from '@/api/client';
 import {useTripSocket} from '@/composables/useTripSocket';
 import {formatRub} from '@/utils/money';
 import { QrCodeOutline, Add } from '@vicons/ionicons5'
-import { useQRCode } from '@vueuse/integrations/useQRCode'
 
 const props = defineProps<{ slug: string }>();
 const route = useRoute();
@@ -90,11 +88,6 @@ watch(
     {flush: 'post'},
 );
 
-const joinName = ref('');
-const joinPassword = ref('');
-const joinPhone = ref('');
-const joinBank = ref('');
-const joinRoomPass = ref('');
 
 async function load() {
   // Не размонтируем UI при обновлении данных — иначе табы сбрасываются.
@@ -121,185 +114,14 @@ useTripSocket(
 
 
 
-async function doJoin() {
-  try {
-    const res = await apiFetch<{ sessionToken: string }>(
-        `/api/trips/${encodeURIComponent(slug.value)}/join`,
-        {
-          method: 'POST',
-          json: {
-            name: joinName.value,
-            password: joinPassword.value,
-            phone: joinPhone.value,
-            bank: joinBank.value,
-            joinPassword: joinRoomPass.value || undefined,
-          },
-        },
-    );
-    setSessionToken(res.sessionToken);
-    message.success('Вы в комнате');
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Ошибка');
-  }
-}
 
 const showScan = ref(false);
-const scan = ref({
-  fn: '',
-  fd: '',
-  fp: '',
-  total: '',
-  date: '',
-  time: '',
-});
 
-// QR scanning state
-const scanning = ref(false);
-const qrVideo = ref<HTMLVideoElement | null>(null);
-let qrScanner: QrScanner | null = null;
-const qrFileInput = ref<HTMLInputElement | null>(null);
 
-function applyParsed(p: { fn?: string; fd?: string; fp?: string; s?: string; t?: string }) {
-  if (p.fn) scan.value.fn = p.fn.trim();
-  if (p.fd) scan.value.fd = p.fd.trim();
-  if (p.fp) scan.value.fp = p.fp.trim();
-  if (p.s) {
-    const num = Number(String(p.s).replace(',', '.'));
-    if (!Number.isNaN(num)) scan.value.total = num.toFixed(2);
-  }
-  if (p.t) {
-    // Expect formats like 20260406T201700, 20260406T201700Z, or 20260406T201700+0300
-    const m = String(p.t).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
-    if (m) {
-      const [_, y, mo, d, h, mi, s] = m;
-      scan.value.date = `${y}-${mo}-${d}`;
-      scan.value.time = `${h}:${mi}`;
-    }
-  }
-}
 
-function parseQrPayload(text: string) {
-  // Parse key=value pairs separated by &. Example: t=20260406T201700&s=52355.66&fn=...&i=...&fp=...&n=1
-  const out: Record<string, string> = {};
-  const parts = text.trim().replace(/^\?/, '').split('&');
-  for (const p of parts) {
-    const [k, v] = p.split('=');
-    if (!k) continue;
-    out[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
-  }
-  const map = {fn: out.fn, fd: out.i, fp: out.fp, s: out.s, t: out.t};
-  applyParsed(map);
-}
 
-async function onQrDetected(res: { data: string } | string) {
-  try {
-    const data = typeof res === 'string' ? res : res.data;
-    if (!data) return;
-    parseQrPayload(data);
-    message.success('QR распознан — поля заполнены');
-  } catch (e) {
-    message.error('Не удалось распознать QR');
-  } finally {
-    // Stop after first successful detection to avoid duplicates
-    await stopCameraScan();
-  }
-}
-
-async function startCameraScan() {
-  try {
-    await nextTick();
-    console.log('Starting QR scanner');
-    if (!qrVideo.value) return;
-    console.log('Starting QR scanner 1');
-    await stopCameraScan();
-    qrScanner = new QrScanner(qrVideo.value, (r) => void onQrDetected(r as unknown as { data: string }), {
-      preferredCamera: 'environment',
-      returnDetailedScanResult: true,
-      highlightScanRegion: true,
-      highlightCodeOutline: true,
-    });
-    await qrScanner.start();
-    console.log('QR scanner started');
-    scanning.value = true;
-  } catch (e) {
-    console.error('QR scanner error', e);
-    message.error('Нет доступа к камере или она недоступна');
-  }
-}
-
-async function stopCameraScan() {
-  try {
-    if (qrScanner) {
-      await qrScanner.stop();
-      qrScanner.destroy();
-      qrScanner = null;
-    }
-  } finally {
-    scanning.value = false;
-  }
-}
-
-function triggerFilePick() {
-  qrFileInput.value?.click();
-}
-
-async function onFileChange(ev: Event) {
-  const input = ev.target as HTMLInputElement;
-  const file = input.files && input.files[0];
-  if (!file) return;
-  try {
-    const res = await QrScanner.scanImage(file, {returnDetailedScanResult: true});
-    await onQrDetected(res as unknown as { data: string });
-  } catch (e) {
-    message.error('QR на изображении не найден');
-  } finally {
-    // reset input to allow re-selecting the same file
-    if (input) input.value = '';
-  }
-}
-
-watch(showScan, async (v) => {
-  if (!v) await stopCameraScan();
-});
-
-onBeforeUnmount(async () => {
-  await stopCameraScan();
-});
-
-async function submitScan() {
-  try {
-    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/receipts/scan`, {
-      method: 'POST',
-      json: scan.value,
-    });
-    message.success('Чек добавлен');
-    showScan.value = false;
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Не удалось проверить чек');
-  }
-}
 
 const showManual = ref(false);
-const manualName = ref('');
-const manualPrice = ref('');
-
-async function submitManual() {
-  const pr = Number(String(manualPrice.value).replace(',', '.'));
-  if (Number.isNaN(pr)) return;
-  try {
-    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/receipts/manual`, {
-      method: 'POST',
-      json: {name: manualName.value, priceRub: pr},
-    });
-    message.success('Позиция добавлена');
-    showManual.value = false;
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Ошибка');
-  }
-}
 
 async function toggleLine(id: string) {
   try {
@@ -377,8 +199,6 @@ watch(
 const expandedReceipt = ref<string | null>(null);
 const roomQrCodeModal = ref(false);
 const selectedLineItemId = ref<string | null>(null);
-const editLineName = ref('');
-const editLinePriceRub = ref('');
 const showEditLine = computed(() => selectedLineItemId.value !== null);
 
 const selectedLineItem = computed(() => {
@@ -405,62 +225,18 @@ function openQrCodeModal() {
 }
 
 function openEditLine(lineId: string) {
-  if (!state.value) return;
-  const li = state.value.lineItems.find((x) => x.id === lineId);
-  if (!li) return;
   selectedLineItemId.value = lineId;
-  editLineName.value = li.name;
-  editLinePriceRub.value = String((li.priceKopecks / 100).toFixed(2));
 }
 
 function closeEditLine() {
   selectedLineItemId.value = null;
 }
 
-async function saveEditLine() {
-  const id = selectedLineItemId.value;
-  if (!id) return;
-  const price = Number(String(editLinePriceRub.value).replace(',', '.'));
-  if (Number.isNaN(price)) {
-    message.error('Введите корректную цену');
-    return;
-  }
-  const priceKopecks = Math.max(0, Math.round(price * 100));
-  try {
-    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/line-items/${id}`, {
-      method: 'PATCH',
-      json: {name: editLineName.value, priceKopecks},
-    });
-    message.success('Сохранено');
-    closeEditLine();
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Ошибка');
-  }
-}
-
-async function deleteLine() {
-  const id = selectedLineItemId.value;
-  if (!id) return;
-  try {
-    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/line-items/${id}`, {
-      method: 'DELETE',
-    });
-    message.success('Удалено');
-    closeEditLine();
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Ошибка');
-  }
-}
+// edit actions moved into EditLineModal component
 
 const shareUrl = computed(() =>
     typeof location !== 'undefined' ? `${location.origin}/t/${slug.value}` : '',
 );
-const qrcode = useQRCode(shareUrl.value, {
-  errorCorrectionLevel: 'H',
-  margin: 3,
-})
 
 const renameTrip = ref('');
 watch(
@@ -523,41 +299,7 @@ async function copyShareUrl() {
 <template>
   <div v-if="loading" class="page">Загрузка…</div>
   <div v-else-if="state && !state.me" class="page">
-    <NCard title="Вход в комнату" class="glass">
-      <NForm label-placement="top">
-        <div class="form-container">
-        <NFormItem label="Имя" :show-feedback="false">
-          <NInput v-model:value="joinName"/>
-        </NFormItem>
-        <NFormItem
-            label="Пароль участника (личный)"
-            :show-feedback="false"
-            tooltip="Это ваш личный пароль в этой поездке. По телефону + этому паролю вы сможете войти с другого устройства."
-        >
-          <NInput v-model:value="joinPassword" type="password" show-password-on="click"/>
-        </NFormItem>
-        <NFormItem label="Телефон" :show-feedback="false" tooltip="По телефону ищем вашу запись в этой комнате.">
-          <NInputGroup>
-            <NInputGroupLabel>+7</NInputGroupLabel>
-            <NInput v-model:value="joinPhone"/>
-          </NInputGroup>
-
-
-        </NFormItem>
-        <NFormItem label="Банк" :show-feedback="false" tooltip="Показывается в финале для переводов.">
-          <NInput v-model:value="joinBank"/>
-        </NFormItem>
-        <NFormItem
-            label="Пароль комнаты (если задан)"
-            :show-feedback="false"
-            tooltip="Общий пароль поездки. Нужен только если админ поставил защиту."
-        >
-          <NInput v-model:value="joinRoomPass" type="password" show-password-on="click" minlength="5"/>
-        </NFormItem>
-        <NButton type="primary" @click="doJoin">Войти</NButton>
-        </div>
-      </NForm>
-    </NCard>
+    <TripJoinAuth :slug="slug" @joined="load" />
   </div>
   <div v-else-if="state" class="page trip">
     <header class="hdr glass">
@@ -714,96 +456,28 @@ async function copyShareUrl() {
       </NTabPane>
     </NTabs>
 
-    <NModal v-model:show="showScan" preset="card" title="Данные из QR чека">
-      <NForm label-placement="top">
-        <NSpace style="margin-bottom: 10px" wrap>
-          <NButton secondary @click="startCameraScan" v-if="!scanning">Сканировать с камеры</NButton>
-          <NButton secondary type="warning" @click="stopCameraScan" v-else>Остановить камеру</NButton>
-          <NButton @click="triggerFilePick">Загрузить изображение</NButton>
-          <input ref="qrFileInput" type="file" accept="image/*" @change="onFileChange" style="display:none"/>
-        </NSpace>
-        <div v-show="scanning" class="qr-preview">
-          <video ref="qrVideo" class="qr-video" muted playsinline></video>
-        </div>
-        <NFormItem label="ФН">
-          <NInput v-model:value="scan.fn"/>
-        </NFormItem>
-        <NFormItem label="ФД">
-          <NInput v-model:value="scan.fd"/>
-        </NFormItem>
-        <NFormItem label="ФП">
-          <NInput v-model:value="scan.fp"/>
-        </NFormItem>
-        <NFormItem label="Сумма (как в чеке)">
-          <NInput v-model:value="scan.total" placeholder="1250.00"/>
-        </NFormItem>
-        <NFormItem label="Дата">
-          <NInput v-model:value="scan.date" placeholder="2025-03-03"/>
-        </NFormItem>
-        <NFormItem label="Время">
-          <NInput v-model:value="scan.time" placeholder="13:00"/>
-        </NFormItem>
-        <NButton type="primary" block @click="submitScan">Проверить и добавить</NButton>
-      </NForm>
-    </NModal>
+    <ScanReceiptModal :slug="slug" v-model:show="showScan" @submitted="load" />
 
-    <NModal v-model:show="showManual" preset="card" title="Ручная позиция">
-      <NForm label-placement="top">
-        <NFormItem label="Название">
-          <NInput v-model:value="manualName" placeholder="Бензин"/>
-        </NFormItem>
-        <NFormItem label="Цена, ₽">
-          <NInput v-model:value="manualPrice" placeholder="500"/>
-        </NFormItem>
-        <NButton type="primary" block @click="submitManual">Добавить</NButton>
-      </NForm>
-    </NModal>
+    <ManualPositionModal :slug="slug" v-model:show="showManual" @submitted="load" />
 
-    <NModal
-        v-model:show="showEditLine"
-        preset="card"
-        title="Редактирование позиции"
-        @after-leave="closeEditLine"
-    >
-      <template v-if="selectedLineItem && canEditSelectedLine">
-        <div class="muted small" style="margin-bottom: 8px">
-          Чек: {{ selectedLineReceipt?.institution }} · плательщик: {{ selectedLineReceipt?.payerName }}
-        </div>
-        <NForm label-placement="top">
-          <NFormItem label="Название">
-            <NInput v-model:value="editLineName"/>
-          </NFormItem>
-          <NFormItem label="Цена, ₽">
-            <NInput v-model:value="editLinePriceRub" placeholder="100.00"/>
-          </NFormItem>
-          <NSpace justify="space-between">
-            <NButton type="error" ghost @click="deleteLine">Удалить</NButton>
-            <NButton type="primary" @click="saveEditLine">Сохранить</NButton>
-          </NSpace>
-        </NForm>
-      </template>
-      <template v-else>
-        <p class="muted">Нет прав на редактирование этой позиции.</p>
-      </template>
-    </NModal>
+    <EditLineModal
+      :slug="slug"
+      :show="showEditLine"
+      :line-id="selectedLineItemId"
+      :receipt-institution="selectedLineReceipt?.institution || null"
+      :payer-name="selectedLineReceipt?.payerName || null"
+      :can-edit="canEditSelectedLine"
+      :initial-name="selectedLineItem?.name || ''"
+      :initial-price-rub="selectedLineItem ? selectedLineItem.priceKopecks / 100 : 0"
+      @changed="load"
+      @update:show="(v:boolean) => { if (!v) closeEditLine() }"
+    />
 
-    <NModal
-        v-model:show="roomQrCodeModal"
-    >
-      <NImage
-          width="300"
-          :src="qrcode"
-      />
-    </NModal>
+    <RoomQrCodeModal v-model:show="roomQrCodeModal" :url="shareUrl" />
   </div>
 </template>
 
 <style scoped>
-.form-container{
-  display: flex;
-  flex-direction: column;
-  gap: 1.5em;
-}
 .trip :deep(.n-tabs) {
   margin-top: 14px;
 }

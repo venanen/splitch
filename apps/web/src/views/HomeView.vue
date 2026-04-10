@@ -8,7 +8,7 @@ import {
   NFormItem,
   NInput,
   useMessage,
-  NSpace,
+  NSpace, NInputGroupLabel, NInputGroup,
 } from 'naive-ui';
 import { apiFetch, setSessionToken } from '@/api/client';
 
@@ -65,6 +65,8 @@ async function createTrip() {
         Комната живёт в рамках поездки: телефон + пароль участника нужны только чтобы зайти с другого устройства.
       </p>
       <NForm label-placement="top">
+        <div class="form-container">
+
         <NFormItem label="Название поездки" :show-feedback="false">
           <NInput v-model:value="tripName" placeholder="Например, Карелия май 2026" />
         </NFormItem>
@@ -86,7 +88,10 @@ async function createTrip() {
           <NInput v-model:value="password" type="password" show-password-on="click" />
         </NFormItem>
         <NFormItem label="Телефон" :show-feedback="false" tooltip="Нормализуется до формата 7XXXXXXXXXX">
-          <NInput v-model:value="phone" placeholder="+7 …" />
+          <NInputGroup>
+            <NInputGroupLabel>+7</NInputGroupLabel>
+            <NInput v-model:value="phone" />
+          </NInputGroup>
         </NFormItem>
         <NFormItem label="Банк для перевода" :show-feedback="false">
           <NInput v-model:value="bank" placeholder="Тинькофф, по номеру телефона …" />
@@ -96,6 +101,7 @@ async function createTrip() {
             Создать комнату
           </NButton>
           <div class="hint muted">После создания откроется страница комнаты — там будет ссылка для друзей.</div>
+        </div>
         </div>
       </NForm>
     </NCard>
@@ -132,5 +138,10 @@ async function createTrip() {
 }
 .hint {
   font-size: 12px;
+}
+.form-container{
+  display: flex;
+  flex-direction: column;
+  gap: 1.5em;
 }
 </style>

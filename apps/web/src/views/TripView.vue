@@ -13,19 +13,18 @@ import {
   NSpace,
   NTabs,
   NTabPane,
+  NIcon,
+  NImage,
+  NInputGroupLabel,
+  NInputGroup,
   useMessage,
 } from 'naive-ui';
 import {apiFetch, setSessionToken} from '@/api/client';
 import QrScanner from 'qr-scanner';
-// Vite: load worker as URL
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import qrWorkerUrl from 'qr-scanner/qr-scanner-worker.min.js?url';
-// Assign worker path for qr-scanner
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(QrScanner as any).WORKER_PATH = qrWorkerUrl;
 import {useTripSocket} from '@/composables/useTripSocket';
 import {formatRub} from '@/utils/money';
+import { QrCodeOutline, Add } from '@vicons/ionicons5'
+import { useQRCode } from '@vueuse/integrations/useQRCode'
 
 const props = defineProps<{ slug: string }>();
 const route = useRoute();
@@ -120,6 +119,8 @@ useTripSocket(
     },
 );
 
+
+
 async function doJoin() {
   try {
     const res = await apiFetch<{ sessionToken: string }>(
@@ -187,7 +188,7 @@ function parseQrPayload(text: string) {
     if (!k) continue;
     out[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
   }
-  const map = { fn: out.fn, fd: out.i, fp: out.fp, s: out.s, t: out.t };
+  const map = {fn: out.fn, fd: out.i, fp: out.fp, s: out.s, t: out.t};
   applyParsed(map);
 }
 
@@ -208,7 +209,9 @@ async function onQrDetected(res: { data: string } | string) {
 async function startCameraScan() {
   try {
     await nextTick();
+    console.log('Starting QR scanner');
     if (!qrVideo.value) return;
+    console.log('Starting QR scanner 1');
     await stopCameraScan();
     qrScanner = new QrScanner(qrVideo.value, (r) => void onQrDetected(r as unknown as { data: string }), {
       preferredCamera: 'environment',
@@ -217,8 +220,10 @@ async function startCameraScan() {
       highlightCodeOutline: true,
     });
     await qrScanner.start();
+    console.log('QR scanner started');
     scanning.value = true;
   } catch (e) {
+    console.error('QR scanner error', e);
     message.error('Нет доступа к камере или она недоступна');
   }
 }
@@ -244,7 +249,7 @@ async function onFileChange(ev: Event) {
   const file = input.files && input.files[0];
   if (!file) return;
   try {
-    const res = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
+    const res = await QrScanner.scanImage(file, {returnDetailedScanResult: true});
     await onQrDetected(res as unknown as { data: string });
   } catch (e) {
     message.error('QR на изображении не найден');
@@ -370,7 +375,7 @@ watch(
 );
 
 const expandedReceipt = ref<string | null>(null);
-
+const roomQrCodeModal = ref(false);
 const selectedLineItemId = ref<string | null>(null);
 const editLineName = ref('');
 const editLinePriceRub = ref('');
@@ -394,6 +399,10 @@ const canEditSelectedLine = computed(() => {
   if (s.trip.finishedAt) return false;
   return s.me.isAdmin || r.payerId === s.me.participantId;
 });
+
+function openQrCodeModal() {
+  roomQrCodeModal.value = true;
+}
 
 function openEditLine(lineId: string) {
   if (!state.value) return;
@@ -448,6 +457,10 @@ async function deleteLine() {
 const shareUrl = computed(() =>
     typeof location !== 'undefined' ? `${location.origin}/t/${slug.value}` : '',
 );
+const qrcode = useQRCode(shareUrl.value, {
+  errorCorrectionLevel: 'H',
+  margin: 3,
+})
 
 const renameTrip = ref('');
 watch(
@@ -512,6 +525,7 @@ async function copyShareUrl() {
   <div v-else-if="state && !state.me" class="page">
     <NCard title="Вход в комнату" class="glass">
       <NForm label-placement="top">
+        <div class="form-container">
         <NFormItem label="Имя" :show-feedback="false">
           <NInput v-model:value="joinName"/>
         </NFormItem>
@@ -523,7 +537,12 @@ async function copyShareUrl() {
           <NInput v-model:value="joinPassword" type="password" show-password-on="click"/>
         </NFormItem>
         <NFormItem label="Телефон" :show-feedback="false" tooltip="По телефону ищем вашу запись в этой комнате.">
-          <NInput v-model:value="joinPhone"/>
+          <NInputGroup>
+            <NInputGroupLabel>+7</NInputGroupLabel>
+            <NInput v-model:value="joinPhone"/>
+          </NInputGroup>
+
+
         </NFormItem>
         <NFormItem label="Банк" :show-feedback="false" tooltip="Показывается в финале для переводов.">
           <NInput v-model:value="joinBank"/>
@@ -533,9 +552,10 @@ async function copyShareUrl() {
             :show-feedback="false"
             tooltip="Общий пароль поездки. Нужен только если админ поставил защиту."
         >
-          <NInput v-model:value="joinRoomPass" type="password"/>
+          <NInput v-model:value="joinRoomPass" type="password" show-password-on="click" minlength="5"/>
         </NFormItem>
         <NButton type="primary" @click="doJoin">Войти</NButton>
+        </div>
       </NForm>
     </NCard>
   </div>
@@ -547,9 +567,14 @@ async function copyShareUrl() {
         <div class="muted small">Код: <code>{{ state.trip.slug }}</code></div>
       </div>
       <div class="hdr-actions">
+
         <NButton size="small" secondary @click="copyShareUrl">
           Скопировать ссылку
         </NButton>
+        <NButton size="small" secondary @click="openQrCodeModal">
+        Показать qr-код
+      </NButton>
+
       </div>
     </header>
 
@@ -565,9 +590,23 @@ async function copyShareUrl() {
       </NTabPane>
       <NTabPane name="p2" tab="Чеки">
         <div class="toolbar glass">
-          <NSpace>
-            <NButton quaternary circle title="Добавить вручную" @click="showManual = true">＋</NButton>
-            <NButton quaternary circle title="QR / ФН" @click="showScan = true">◎</NButton>
+          <NSpace justify="space-around">
+            <NButton quaternary  title="Добавить вручную" @click="showManual = true">
+              <template #icon>
+                <NIcon>
+                  <Add/>
+                </NIcon>
+              </template>
+              Вручную
+            </NButton>
+            <NButton quaternary  title="QR / ФН" @click="showScan = true">
+              <template #icon>
+              <NIcon>
+                <QrCodeOutline/>
+              </NIcon>
+            </template>
+              Чек
+            </NButton>
           </NSpace>
           <span v-if="refreshing" class="muted small" style="margin-left: 8px">обновление…</span>
         </div>
@@ -681,9 +720,9 @@ async function copyShareUrl() {
           <NButton secondary @click="startCameraScan" v-if="!scanning">Сканировать с камеры</NButton>
           <NButton secondary type="warning" @click="stopCameraScan" v-else>Остановить камеру</NButton>
           <NButton @click="triggerFilePick">Загрузить изображение</NButton>
-          <input ref="qrFileInput" type="file" accept="image/*" @change="onFileChange" style="display:none" />
+          <input ref="qrFileInput" type="file" accept="image/*" @change="onFileChange" style="display:none"/>
         </NSpace>
-        <div v-if="scanning" class="qr-preview">
+        <div v-show="scanning" class="qr-preview">
           <video ref="qrVideo" class="qr-video" muted playsinline></video>
         </div>
         <NFormItem label="ФН">
@@ -747,10 +786,24 @@ async function copyShareUrl() {
         <p class="muted">Нет прав на редактирование этой позиции.</p>
       </template>
     </NModal>
+
+    <NModal
+        v-model:show="roomQrCodeModal"
+    >
+      <NImage
+          width="300"
+          :src="qrcode"
+      />
+    </NModal>
   </div>
 </template>
 
 <style scoped>
+.form-container{
+  display: flex;
+  flex-direction: column;
+  gap: 1.5em;
+}
 .trip :deep(.n-tabs) {
   margin-top: 14px;
 }
@@ -769,7 +822,7 @@ async function copyShareUrl() {
 .hdr {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   padding: 16px 16px 14px;
 }
 
@@ -782,6 +835,8 @@ async function copyShareUrl() {
 .hdr-actions {
   display: flex;
   gap: 10px;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .hdr h1 {

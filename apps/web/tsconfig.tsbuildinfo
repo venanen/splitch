@@ -1,0 +1,1 @@
+{"root":["./src/env.d.ts","./src/main.ts","./src/api/client.ts","./src/composables/usetripsocket.ts","./src/router/index.ts","./src/utils/money.ts","./src/app.vue","./src/views/homeview.vue","./src/views/tripview.vue","./vite.config.ts"],"version":"5.9.3"}

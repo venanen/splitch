@@ -19,10 +19,10 @@ import ScanReceiptModal from '@/components/trip/ScanReceiptModal.vue';
 import ManualPositionModal from '@/components/trip/ManualPositionModal.vue';
 import EditLineModal from '@/components/trip/EditLineModal.vue';
 import RoomQrCodeModal from '@/components/trip/RoomQrCodeModal.vue';
-import {apiFetch} from '@/api/client';
+import {apiFetch, setSessionToken} from '@/api/client';
 import {useTripSocket} from '@/composables/useTripSocket';
 import {formatRub} from '@/utils/money';
-import { QrCodeOutline, Add } from '@vicons/ionicons5'
+import {QrCodeOutline, Add} from '@vicons/ionicons5'
 
 const props = defineProps<{ slug: string }>();
 const route = useRoute();
@@ -113,12 +113,7 @@ useTripSocket(
 );
 
 
-
-
 const showScan = ref(false);
-
-
-
 
 
 const showManual = ref(false);
@@ -220,6 +215,10 @@ const canEditSelectedLine = computed(() => {
   return s.me.isAdmin || r.payerId === s.me.participantId;
 });
 
+function logOut(){
+    setSessionToken(null)
+}
+
 function openQrCodeModal() {
   roomQrCodeModal.value = true;
 }
@@ -299,7 +298,7 @@ async function copyShareUrl() {
 <template>
   <div v-if="loading" class="page">Загрузка…</div>
   <div v-else-if="state && !state.me" class="page">
-    <TripJoinAuth :slug="slug" @joined="load" />
+    <TripJoinAuth :slug="slug" @joined="load"/>
   </div>
   <div v-else-if="state" class="page trip">
     <header class="hdr glass">
@@ -314,8 +313,11 @@ async function copyShareUrl() {
           Скопировать ссылку
         </NButton>
         <NButton size="small" secondary @click="openQrCodeModal">
-        Показать qr-код
-      </NButton>
+          Показать qr-код
+        </NButton>
+        <NButton size="small" secondary @click="logOut" type="error">
+          Выйти
+        </NButton>
 
       </div>
     </header>
@@ -333,7 +335,7 @@ async function copyShareUrl() {
       <NTabPane name="p2" tab="Чеки">
         <div class="toolbar glass">
           <NSpace justify="space-around">
-            <NButton quaternary  title="Добавить вручную" @click="showManual = true">
+            <NButton quaternary title="Добавить вручную" @click="showManual = true">
               <template #icon>
                 <NIcon>
                   <Add/>
@@ -341,12 +343,12 @@ async function copyShareUrl() {
               </template>
               Вручную
             </NButton>
-            <NButton quaternary  title="QR / ФН" @click="showScan = true">
+            <NButton quaternary title="QR / ФН" @click="showScan = true">
               <template #icon>
-              <NIcon>
-                <QrCodeOutline/>
-              </NIcon>
-            </template>
+                <NIcon>
+                  <QrCodeOutline/>
+                </NIcon>
+              </template>
               Чек
             </NButton>
           </NSpace>
@@ -456,24 +458,24 @@ async function copyShareUrl() {
       </NTabPane>
     </NTabs>
 
-    <ScanReceiptModal :slug="slug" v-model:show="showScan" @submitted="load" />
+    <ScanReceiptModal :slug="slug" v-model:show="showScan" @submitted="load"/>
 
-    <ManualPositionModal :slug="slug" v-model:show="showManual" @submitted="load" />
+    <ManualPositionModal :slug="slug" v-model:show="showManual" @submitted="load"/>
 
     <EditLineModal
-      :slug="slug"
-      :show="showEditLine"
-      :line-id="selectedLineItemId"
-      :receipt-institution="selectedLineReceipt?.institution || null"
-      :payer-name="selectedLineReceipt?.payerName || null"
-      :can-edit="canEditSelectedLine"
-      :initial-name="selectedLineItem?.name || ''"
-      :initial-price-rub="selectedLineItem ? selectedLineItem.priceKopecks / 100 : 0"
-      @changed="load"
-      @update:show="(v:boolean) => { if (!v) closeEditLine() }"
+        :slug="slug"
+        :show="showEditLine"
+        :line-id="selectedLineItemId"
+        :receipt-institution="selectedLineReceipt?.institution || null"
+        :payer-name="selectedLineReceipt?.payerName || null"
+        :can-edit="canEditSelectedLine"
+        :initial-name="selectedLineItem?.name || ''"
+        :initial-price-rub="selectedLineItem ? selectedLineItem.priceKopecks / 100 : 0"
+        @changed="load"
+        @update:show="(v:boolean) => { if (!v) closeEditLine() }"
     />
 
-    <RoomQrCodeModal v-model:show="roomQrCodeModal" :url="shareUrl" />
+    <RoomQrCodeModal v-model:show="roomQrCodeModal" :url="shareUrl"/>
   </div>
 </template>
 

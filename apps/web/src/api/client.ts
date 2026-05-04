@@ -18,7 +18,8 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = getSessionToken();
-  if (token) headers.set('x-session-token', token);
+  // Always send header to override HttpOnly cookie on the server. Empty value = no session.
+  headers.set('x-session-token', token ?? '');
   if (init?.json !== undefined) {
     headers.set('Content-Type', 'application/json');
   }

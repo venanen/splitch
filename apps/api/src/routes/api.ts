@@ -50,7 +50,10 @@ async function findTripBySlug(slug: string) {
 
 export const apiRoutes = new Elysia({ prefix: '/api' })
   .derive(async ({ cookie, request }) => {
-    const token = cookie[COOKIE]?.value ?? request.headers.get('x-session-token') ?? undefined;
+    const headerToken = request.headers.get('x-session-token');
+    const token = headerToken !== null
+      ? (headerToken || undefined)
+      : (cookie[COOKIE]?.value ?? undefined);
     const session = await getParticipantByToken(token);
     return { sessionToken: token, session };
   })
@@ -232,9 +235,10 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
 
     const countByLine = new Map<string, number>();
     const mySelection = new Set<string>();
+    const sameTrip = !!session && session.tripId === trip.id;
     for (const s of sels) {
       countByLine.set(s.lineItemId, (countByLine.get(s.lineItemId) ?? 0) + 1);
-      if (session && s.participantId === session.participantId) {
+      if (sameTrip && s.participantId === session!.participantId) {
         mySelection.add(s.lineItemId);
       }
     }
@@ -248,10 +252,10 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
         name: trip.name,
         finishedAt: trip.finishedAt?.toISOString() ?? null,
       },
-      me: session
+      me: sameTrip
         ? {
-            participantId: session.participantId,
-            isAdmin: session.isAdmin,
+            participantId: session!.participantId,
+            isAdmin: session!.isAdmin,
           }
         : null,
       participants: plist.map((p) => ({
@@ -282,7 +286,7 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
         priceKopecks: li.priceKopecks,
         forcedForAll: li.forcedForAll,
         selectedCount: countByLine.get(li.id) ?? 0,
-        mySelected: mySelection.has(li.id) || (li.forcedForAll && !!session),
+        mySelected: mySelection.has(li.id) || (li.forcedForAll && sameTrip),
       })),
     };
   })

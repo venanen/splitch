@@ -215,8 +215,14 @@ const canEditSelectedLine = computed(() => {
   return s.me.isAdmin || r.payerId === s.me.participantId;
 });
 
-function logOut(){
-    setSessionToken(null)
+async function logOut() {
+  try {
+    setSessionToken(null);
+    // Перезагружаем состояние комнаты: покажется форма входа
+    await load();
+  } catch {
+    // ignore
+  }
 }
 
 function openQrCodeModal() {

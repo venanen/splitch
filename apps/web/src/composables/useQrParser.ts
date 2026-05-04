@@ -23,7 +23,7 @@ export function parseQrPayload(text: string): QrParsed {
 
 export function deriveDateTimeFromT(t?: string): { date?: string; time?: string } {
   if (!t) return {};
-  const m = String(t).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+  const m = String(t).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})*/);
   if (!m) return {};
   const [, y, mo, d, h, mi] = m;
   return { date: `${y}-${mo}-${d}`, time: `${h}:${mi}` };

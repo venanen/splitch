@@ -119,6 +119,24 @@ export function computeDebtMatrix(input: SettlementInput): DebtMatrix {
     matrix[i]![j]! += kopecks;
   };
 
+  const normaliseMatrix = () => {
+    for(let i = 0; i < matrix.length; i++) { // кто должен
+      for (let j = 0; j < matrix[i].length; j++) { // кому должен
+        if(!!matrix[i][j]) {
+          if(matrix[i][j] >= matrix[j][i]){ // Если тот i должен j больше, чем j должен i - то i должен меньше на долг j, а j не должен ничего
+            matrix[i][j] = matrix[i][j] - matrix[j][i];
+            matrix[j][i] = 0
+          }
+          if(matrix[i][j] < matrix[j][i]){ // Если тот j должен i больше, чем i должен j - то j должен меньше на долг i, а i не должен ничего
+            matrix[j][i] = matrix[j][i] - matrix[i][j];
+            matrix[i][j] = 0
+          }
+        }
+      }
+    }
+    return matrix;
+  }
+
   for (const item of input.lineItems) {
     const perPerson = allocateLineItem(item, ids);
     for (const [participantId, amount] of perPerson) {
@@ -150,7 +168,7 @@ export function computeDebtMatrix(input: SettlementInput): DebtMatrix {
       addDebt(pid, payerId, sign * (parts[i] ?? 0));
     }
   }
-
+  normaliseMatrix()
   return { participantIds: ids, kopecks: matrix };
 }
 

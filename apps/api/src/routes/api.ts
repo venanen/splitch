@@ -49,11 +49,24 @@ async function findTripBySlug(slug: string) {
 }
 
 export const apiRoutes = new Elysia({ prefix: '/api' })
+    .onError(({ code, error, set }) => {
+        if (code === 'VALIDATION') {
+            set.status = 422
+            return {
+                status: 'error',
+                type: 'validation',
+                // error.message будет содержать вашу строку из схемы
+                message: error.message,
+                // Если нужно прокинуть все детали валидации:
+                errors: error.all
+            }
+        }
+    })
   .derive(async ({ cookie, request }) => {
     const headerToken = request.headers.get('x-session-token');
     const token = headerToken !== null
       ? (headerToken || undefined)
-      : (cookie[COOKIE]?.value ?? undefined);
+      : (cookie[COOKIE]?.value ?? undefined) as string;
     const session = await getParticipantByToken(token);
     return { sessionToken: token, session };
   })
@@ -114,12 +127,12 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
     },
     {
       body: t.Object({
-        tripName: t.String({ minLength: 1 }),
+        tripName: t.String({ minLength: 3, error: 'Имя поездки должно быть длиннее 3 символов' }),
         joinPassword: t.Optional(t.String()),
-        name: t.String({ minLength: 1 }),
-        password: t.String({ minLength: 4 }),
-        phone: t.String({ minLength: 5 }),
-        bank: t.String({ minLength: 1 }),
+        name: t.String({ minLength: 3, error: 'Имя должно быть длиннее 3 символов' }),
+        password: t.String({ minLength: 4, error: 'Пароль должен быть длиннее 3 символов' }),
+        phone: t.String({ minLength: 5, error: 'Телефон должен быть длиннее 5 символов'  }),
+        bank: t.String({ minLength: 1, error: 'Банк не может быть пустым'  }),
       }),
     },
   )
@@ -131,10 +144,6 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
       if (!trip) {
         set.status = 404;
         return { error: 'Поездка не найдена' };
-      }
-      if (trip.finishedAt) {
-        set.status = 400;
-        return { error: 'Поездка уже закрыта' };
       }
       if (trip.joinPasswordHash && body.joinPassword) {
         const ok = await Bun.password.verify(body.joinPassword, trip.joinPasswordHash);
@@ -192,10 +201,10 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
     {
       params: t.Object({ slug: t.String() }),
       body: t.Object({
-        name: t.String({ minLength: 1 }),
-        password: t.String({ minLength: 4 }),
-        phone: t.String({ minLength: 5 }),
-        bank: t.String({ minLength: 1 }),
+        name: t.String({ minLength: 1, error: 'Имя не может быть пустым'}),
+        password: t.String({ minLength: 4, error: 'Пароль должен быть длиннее 4 символов' }),
+        phone: t.String({ minLength: 5, error: 'Телефон должен быть длиннее 4 символов' }),
+        bank: t.String({ minLength: 1, error: 'Банк не может быть пустым' }),
         joinPassword: t.Optional(t.String()),
       }),
     },
@@ -767,7 +776,7 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
       .select()
       .from(participants)
       .where(eq(participants.tripId, trip.id));
-    const names = new Map(plist.map((p) => [p.id, p.name] as const));
+    const names = new Map(plist.map((p) => [p.id, {name: p.name, bank: p.bank, phone: p.phoneNormalized}] as const));
 
     return {
       participantIds: matrix.participantIds,

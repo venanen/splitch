@@ -29,9 +29,11 @@ export async function apiFetch<T>(
     credentials: 'include',
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
   });
-  const data = (await res.json()) as T & { error?: string };
+  const data = (await res.json()) as T & { error?: string, message?: string };
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    // Ищем сообщение в разных полях, которые может вернуть бэкенд
+    const errorMessage = data.message || data.error || `Ошибка сервера: ${res.status}`;
+    throw new Error(errorMessage);
   }
   return data as T;
 }

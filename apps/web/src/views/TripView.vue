@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed, ref, watch} from 'vue';
+import {computed, onMounted, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {
   NButton,
@@ -12,6 +12,9 @@ import {
   NTabs,
   NTabPane,
   NIcon,
+  NTable,
+  NIconWrapper,
+  NTag,
   useMessage,
 } from 'naive-ui';
 import TripJoinAuth from '@/components/trip/TripJoinAuth.vue';
@@ -22,7 +25,8 @@ import RoomQrCodeModal from '@/components/trip/RoomQrCodeModal.vue';
 import {apiFetch, setSessionToken} from '@/api/client';
 import {useTripSocket} from '@/composables/useTripSocket';
 import {formatRub} from '@/utils/money';
-import {QrCodeOutline, Add} from '@vicons/ionicons5'
+import {QrCodeOutline, Add, CopyOutline, Checkmark, LockClosedOutline, LockOpenOutline} from '@vicons/ionicons5'
+import {useClipboard} from "@vueuse/core";
 
 const props = defineProps<{ slug: string }>();
 const route = useRoute();
@@ -72,6 +76,7 @@ const refreshing = ref(false);
 
 const tabKey = computed(() => `splich_active_tab:${slug.value}`);
 const activeTab = ref('p3');
+const {text, copy, copied, isSupported} = useClipboard()
 watch(
     tabKey,
     (k) => {
@@ -138,6 +143,7 @@ async function toggleLine(id: string) {
 
 const productSearch = ref('');
 const hideSelected = ref(false);
+const hideSelectedAll = ref(true);
 const receiptFilter = ref<string[] | null>(null);
 
 const filteredProducts = computed(() => {
@@ -149,6 +155,7 @@ const filteredProducts = computed(() => {
   const q = productSearch.value.trim().toLowerCase();
   if (q) rows = rows.filter((l) => l.name.toLowerCase().includes(q));
   if (hideSelected.value) rows = rows.filter((l) => !l.mySelected);
+  if (hideSelectedAll.value) rows = rows.filter((l) => !l.forcedForAll);
   rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   return rows;
 });
@@ -172,7 +179,7 @@ async function finishTrip() {
 
 const settlement = ref<{
   participantIds: string[];
-  names: Record<string, string>;
+  names: Record<string, Record<string, string>>;
   kopecks: number[][];
 } | null>(null);
 
@@ -185,11 +192,25 @@ async function loadSettlement() {
 }
 
 watch(
-    () => state.value?.trip.finishedAt,
+    () => activeTab.value,
     (v) => {
-      if (v) void loadSettlement();
+      if (v === 'p4') void loadSettlement();
     },
 );
+
+watch(copied, (newVal) => {
+  if (newVal) {
+    message.success('Скопировано!')
+    // Здесь можно вызвать ваш Toast или Alert
+  }
+})
+
+
+onMounted(() => {
+  if(state.value?.me){
+    loadSettlement();
+  }
+})
 
 const expandedReceipt = ref<string | null>(null);
 const roomQrCodeModal = ref(false);
@@ -328,7 +349,8 @@ async function copyShareUrl() {
       </div>
     </header>
 
-    <NTabs v-model:value="activeTab" type="line" animated>
+    <NTabs v-model:value="activeTab" type="line" default-value="p1" animated justify-content="space-evenly"
+           :bar-width="28">
       <NTabPane name="p1" tab="Участники">
         <ul class="list">
           <li v-for="p in state.participants" :key="p.id">
@@ -379,7 +401,11 @@ async function copyShareUrl() {
         <div class="filters glass">
           <NInput v-model:value="productSearch" placeholder="Поиск по товарам" clearable/>
           <NSpace style="margin-top: 10px" wrap>
-            <NCheckbox v-model:checked="hideSelected">Скрыть отмеченные мной</NCheckbox>
+            <div class="checkbox-container">
+              <NCheckbox v-model:checked="hideSelected">Скрыть отмеченные мной</NCheckbox>
+              <NCheckbox v-model:checked="hideSelectedAll">Скрыть выбранные для всех</NCheckbox>
+            </div>
+
             <NSelect
                 v-model:value="receiptFilter"
                 multiple
@@ -391,53 +417,95 @@ async function copyShareUrl() {
           </NSpace>
         </div>
         <div v-for="li in filteredProducts" :key="li.id" class="prod-row">
-          <NCheckbox
-              :checked="li.mySelected || li.forcedForAll"
-              :disabled="!!state.trip.finishedAt || li.forcedForAll"
-              @update:checked="() => toggleLine(li.id)"
-          />
+          <NTag round v-if="!li.forcedForAll"
+                :disabled="!!state.trip.finishedAt"
+                :type="li.mySelected ?
+                  'success'
+                  : 'info'"
+                :bordered="!li.mySelected"
+                @click="() => toggleLine(li.id)">
+            {{ li.selectedCount }}
+            <template #icon>
+              <n-icon :component="Checkmark"/>
+            </template>
+          </NTag>
+          <NTag round v-else
+                :disabled="true"
+                type="info"
+                :bordered="false">
+            {{ li.selectedCount }}
+            <template #icon>
+              <n-icon :component="LockClosedOutline"/>
+            </template>
+          </NTag>
           <span class="prod-name">{{ li.name }}</span>
           <span class="prod-meta">{{ formatRub(li.priceKopecks) }}</span>
-          <span v-if="li.selectedCount > 0" class="cnt">✓ {{ li.selectedCount }}</span>
           <NButton
               v-if="state.me?.isAdmin && !state.trip.finishedAt"
               size="tiny"
-              quaternary
+              circle
+              secondary
+              strong
+              :type="li.forcedForAll ? 'warning' : 'primary'"
               @click="setForced(li.id, !li.forcedForAll)"
           >
-            {{ li.forcedForAll ? 'разблок.' : 'всем' }}
+            <template #icon>
+              <NIcon>
+                <LockClosedOutline v-if="li.forcedForAll"/>
+                <LockOpenOutline v-else></LockOpenOutline>
+              </NIcon>
+            </template>
           </NButton>
         </div>
       </NTabPane>
       <NTabPane name="p4" tab="Финал">
-        <template v-if="!state.trip.finishedAt && state.me?.isAdmin">
-          <NButton type="warning" @click="finishTrip">Поездка закончена</NButton>
-        </template>
-        <template v-else-if="state.trip.finishedAt">
+        <div class="head-container">
           <NButton size="small" @click="loadSettlement">Обновить матрицу</NButton>
-          <table v-if="settlement" class="matrix">
+          <span class="muted" v-if="!state.trip.finishedAt">Поездка еще не закрыта, не переводите деньги!</span>
+        </div>
+
+        <div class="table-container">
+          <NTable v-if="settlement && state.me" class="matrix" :striped="true">
             <thead>
             <tr>
               <th></th>
               <th v-for="pid in settlement.participantIds" :key="pid">
-                {{ settlement.names[pid] ?? pid }}
+                <div class="user-info">
+                  {{ settlement.names[pid].name ?? pid }}
+                </div>
+
               </th>
             </tr>
             </thead>
             <tbody>
             <tr v-for="(rowId, i) in settlement.participantIds" :key="rowId">
-              <th>{{ settlement.names[rowId] ?? rowId }}</th>
+              <th>{{ settlement.names[rowId].name ?? rowId }}</th>
               <td v-for="(colId, j) in settlement.participantIds" :key="colId">
-                {{ formatRub(settlement.kopecks[i]?.[j] ?? 0) }}
+                <span v-if="settlement.kopecks[i]?.[j] !== 0">{{ formatRub(settlement.kopecks[i]?.[j] ?? 0) }}</span>
+                <span v-else></span>
               </td>
             </tr>
+            <tr>
+              <th>Реквизиты</th>
+              <th v-for="pid in settlement.participantIds" :key="pid">
+                <div class="user-info" v-if="settlement.names[pid].bank && settlement.names[pid].phone">
+                  {{ settlement.names[pid].bank ?? '' }}
+                  <code @click="copy('+'+settlement.names[pid].phone)">
+                    <n-icon size="10" :component="CopyOutline"/>
+                    +{{ settlement.names[pid].phone ?? '' }}
+                  </code>
+                </div>
+
+              </th>
+            </tr>
             </tbody>
-          </table>
-          <p v-if="settlement && state.me" class="muted" style="margin-top: 1rem">
-            Строка — кто должен; колонка — кому. Нули на диагонали.
-          </p>
-        </template>
-        <p v-else class="muted">Закроет администратор.</p>
+          </NTable>
+        </div>
+
+        <p v-if="settlement && state.me" class="muted" style="margin-top: 1rem">
+          Строка — кто должен; колонка — кому. Нули на диагонали.
+        </p>
+
       </NTabPane>
       <NTabPane v-if="state.me?.isAdmin" name="p5" tab="Админ">
         <div class="glass admin">
@@ -486,15 +554,48 @@ async function copyShareUrl() {
 </template>
 
 <style scoped>
+.checkbox-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.head-container {
+  display: flex;
+  gap: 1em;
+  align-items: center;
+}
+
+code {
+  font-size: 0.85rem;
+  word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: 0.1em;
+  background: rgb(0 0 0 / 19%);
+  border-radius: 5px;
+  padding: 5px;
+  cursor: pointer;
+}
+
+.table-container {
+  overflow: auto;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+}
+
 .trip :deep(.n-tabs) {
   margin-top: 14px;
 }
 
 .trip :deep(.n-tabs .n-tabs-nav) {
   position: sticky;
-  top: 10px;
+  top: 0px;
   z-index: 10;
   backdrop-filter: blur(10px);
+  border-radius: 0 10px;
 }
 
 .trip :deep(.n-tabs .n-tabs-nav-scroll-content) {
@@ -604,6 +705,8 @@ async function copyShareUrl() {
 
 .prod-name {
   font-size: 0.95rem;
+  overflow: auto;
+  white-space: nowrap;
 }
 
 .prod-meta {

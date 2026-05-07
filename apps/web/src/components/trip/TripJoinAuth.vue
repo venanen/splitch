@@ -34,6 +34,7 @@ async function doJoin() {
     message.success('Вы в комнате');
     emit('joined');
   } catch (e) {
+    console.log(e)
     message.error(e instanceof Error ? e.message : 'Ошибка');
   }
 }

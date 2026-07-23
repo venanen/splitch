@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { NCard, NForm, NFormItem, NInput, NInputGroup, NInputGroupLabel, NButton } from 'naive-ui';
 import { useMessage } from 'naive-ui';
-import { apiFetch, setSessionToken } from '@/api/client';
+import { apiFetch, setLastTripSlug, setSessionToken } from '@/api/client';
 
 const props = defineProps<{ slug: string }>();
 const emit = defineEmits<{ (e: 'joined'): void }>();
@@ -31,6 +31,7 @@ async function doJoin() {
       },
     );
     setSessionToken(res.sessionToken);
+    setLastTripSlug(props.slug);
     message.success('Вы в комнате');
     emit('joined');
   } catch (e) {

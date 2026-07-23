@@ -2,6 +2,8 @@
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_KEY = 'splich_session';
+/** Последняя комната — чтобы PWA после start_url=/ возвращала туда. */
+const LAST_TRIP_KEY = 'splich_last_trip';
 
 export function getSessionToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -9,7 +11,23 @@ export function getSessionToken(): string | null {
 
 export function setSessionToken(token: string | null): void {
   if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  else {
+    localStorage.removeItem(TOKEN_KEY);
+    // Выход из сессии — больше не редиректим на старую комнату
+    clearLastTripSlug();
+  }
+}
+
+export function getLastTripSlug(): string | null {
+  return localStorage.getItem(LAST_TRIP_KEY);
+}
+
+export function setLastTripSlug(slug: string): void {
+  localStorage.setItem(LAST_TRIP_KEY, slug);
+}
+
+export function clearLastTripSlug(): void {
+  localStorage.removeItem(LAST_TRIP_KEY);
 }
 
 export async function apiFetch<T>(

@@ -10,7 +10,7 @@ import {
   useMessage,
   NSpace, NInputGroupLabel, NInputGroup,
 } from 'naive-ui';
-import { apiFetch, setSessionToken } from '@/api/client';
+import { apiFetch, setLastTripSlug, setSessionToken } from '@/api/client';
 
 const router = useRouter();
 const message = useMessage();
@@ -41,6 +41,7 @@ async function createTrip() {
       },
     });
     setSessionToken(res.sessionToken);
+    setLastTripSlug(res.slug);
     message.success('Комната создана');
     await router.push({ name: 'trip', params: { slug: res.slug } });
   } catch (e) {

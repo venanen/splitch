@@ -22,7 +22,7 @@ import ScanReceiptModal from '@/components/trip/ScanReceiptModal.vue';
 import ManualPositionModal from '@/components/trip/ManualPositionModal.vue';
 import EditLineModal from '@/components/trip/EditLineModal.vue';
 import RoomQrCodeModal from '@/components/trip/RoomQrCodeModal.vue';
-import {apiFetch, setSessionToken} from '@/api/client';
+import {apiFetch, clearLastTripSlug, setLastTripSlug, setSessionToken} from '@/api/client';
 import {useTripSocket} from '@/composables/useTripSocket';
 import {formatRub} from '@/utils/money';
 import {QrCodeOutline, Add, CopyOutline, Checkmark, LockClosedOutline, LockOpenOutline} from '@vicons/ionicons5'
@@ -100,8 +100,17 @@ async function load() {
   else refreshing.value = true;
   try {
     state.value = await apiFetch<TripPayload>(`/api/trips/${encodeURIComponent(slug.value)}`);
+    // Запоминаем комнату для возврата из PWA (start_url всегда /)
+    if (state.value.me && slug.value) {
+      setLastTripSlug(slug.value);
+    }
   } catch (e) {
-    message.error(e instanceof Error ? e.message : 'Ошибка загрузки');
+    const msg = e instanceof Error ? e.message : 'Ошибка загрузки';
+    // Только «не найдено» — иначе сетевой сбой сотрёт last trip
+    if (msg === 'Не найдено') {
+      clearLastTripSlug();
+    }
+    message.error(msg);
   } finally {
     loading.value = false;
     refreshing.value = false;

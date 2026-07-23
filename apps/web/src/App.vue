@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, ruRU, dateRuRU, darkTheme } from 'naive-ui';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt.vue';
 
 const themeOverrides = {
   common: {
@@ -16,8 +17,7 @@ const themeOverrides = {
     primaryColorHover: '#8b5cf6',
     primaryColorPressed: '#6d28d9',
     primaryColorSuppl: '#8b5cf6',
-    checkMarkColor: 'rgb(0 216 255)'
-
+    checkMarkColor: 'rgb(0 216 255)',
   },
   Input: {
     color: 'rgba(255,255,255,0.06)',
@@ -28,7 +28,6 @@ const themeOverrides = {
     borderFocus: '1px solid rgba(139,92,246,0.85)',
     boxShadowFocus: '0 0 0 2px rgba(139,92,246,0.25)',
     caretColor: 'rgba(255,255,255,0.92)',
-
   },
   Card: {
     color: 'rgba(255,255,255,0.06)',
@@ -42,11 +41,17 @@ const themeOverrides = {
   },
 };
 </script>
-rgb(0 216 255);
+
 <template>
-  <NConfigProvider :locale="ruRU" :date-locale="dateRuRU" :theme="darkTheme" >
+  <NConfigProvider
+    :locale="ruRU"
+    :date-locale="dateRuRU"
+    :theme="darkTheme"
+    :theme-overrides="themeOverrides"
+  >
     <NMessageProvider>
       <router-view />
+      <PwaInstallPrompt />
     </NMessageProvider>
   </NConfigProvider>
 </template>

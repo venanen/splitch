@@ -15,13 +15,49 @@ export default defineConfig(({ mode }) => {
       vue(),
       VitePWA({
         registerType: 'autoUpdate',
+        includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
         manifest: {
           name: 'splich',
           short_name: 'splich',
-          theme_color: '#18181b',
-          background_color: '#fafafa',
+          description: 'Разделение чеков в поездках',
+          lang: 'ru',
+          theme_color: '#0b1020',
+          background_color: '#0b1020',
           display: 'standalone',
           start_url: '/',
+          icons: [
+            {
+              src: 'icons/icon-192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: 'icons/icon-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: 'icons/icon-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+          ],
+        },
+        workbox: {
+          navigateFallback: '/index.html',
+          runtimeCaching: [
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({ url }) => url.pathname === '/ws' || url.pathname.startsWith('/ws'),
+              handler: 'NetworkOnly',
+            },
+          ],
         },
       }),
     ],

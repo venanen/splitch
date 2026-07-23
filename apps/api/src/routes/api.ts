@@ -461,6 +461,61 @@ export const apiRoutes = new Elysia({ prefix: '/api' })
       }),
     },
   )
+  /** Сменить плательщика чека (админ) */
+  .patch(
+    '/trips/:slug/receipts/:receiptId',
+    async ({ params, body, session, set }) => {
+      if (!session?.isAdmin) {
+        set.status = 403;
+        return { error: 'Только администратор' };
+      }
+      const trip = await findTripBySlug(params.slug);
+      if (!trip || trip.id !== session.tripId) {
+        set.status = 404;
+        return { error: 'Не найдено' };
+      }
+      if (trip.finishedAt) {
+        set.status = 400;
+        return { error: 'Поездка закрыта' };
+      }
+
+      const [rec] = await db
+        .select()
+        .from(receipts)
+        .where(and(eq(receipts.id, params.receiptId), eq(receipts.tripId, trip.id)))
+        .limit(1);
+      if (!rec) {
+        set.status = 404;
+        return { error: 'Чек не найден' };
+      }
+
+      const [payer] = await db
+        .select()
+        .from(participants)
+        .where(
+          and(eq(participants.id, body.payerId), eq(participants.tripId, trip.id)),
+        )
+        .limit(1);
+      if (!payer) {
+        set.status = 400;
+        return { error: 'Участник не найден' };
+      }
+
+      if (rec.payerId !== body.payerId) {
+        await db
+          .update(receipts)
+          .set({ payerId: body.payerId })
+          .where(eq(receipts.id, rec.id));
+        broadcastTrip(trip.id, { type: 'trip_updated' });
+      }
+
+      return { ok: true };
+    },
+    {
+      params: t.Object({ slug: t.String(), receiptId: t.String() }),
+      body: t.Object({ payerId: t.String() }),
+    },
+  )
   /** Переключить свою отметку по позиции */
   .post(
     '/trips/:slug/line-items/:lineId/toggle',

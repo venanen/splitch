@@ -298,6 +298,28 @@ async function removeParticipant(id: string) {
   }
 }
 
+const participantSelectOptions = computed(() =>
+  (state.value?.participants ?? []).map((p) => ({
+    label: p.name,
+    value: p.id,
+  })),
+);
+
+async function changeReceiptPayer(receiptId: string, payerId: string) {
+  const rec = state.value?.receipts.find((r) => r.id === receiptId);
+  if (!rec || rec.payerId === payerId) return;
+  try {
+    await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/receipts/${receiptId}`, {
+      method: 'PATCH',
+      json: { payerId },
+    });
+    message.success('Плательщик обновлён');
+    await load();
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : 'Ошибка');
+  }
+}
+
 async function setForced(lineId: string, v: boolean) {
   try {
     await apiFetch(`/api/trips/${encodeURIComponent(slug.value)}/line-items/${lineId}`, {
@@ -518,16 +540,34 @@ async function copyShareUrl() {
               </NSpace>
             </NFormItem>
           </NForm>
-          <ul v-if="!state.trip.finishedAt" class="list">
-            <li
-                v-for="p in (state?.participants ?? []).filter((x) => x.id !== state?.me?.participantId)"
-                :key="p.id"
-            >
-              {{ p.name }}
-              <NButton size="small" quaternary type="error" @click="removeParticipant(p.id)">Удалить</NButton>
-            </li>
-          </ul>
-          <NButton v-if="!state.trip.finishedAt" type="error" ghost @click="finishTrip">Завершить поездку</NButton>
+          <template v-if="!state.trip.finishedAt">
+            <h3 class="admin-section-title">Плательщики чеков</h3>
+            <div v-if="state.receipts.length === 0" class="muted small">Пока нет чеков</div>
+            <ul v-else class="list payer-list">
+              <li v-for="r in state.receipts" :key="r.id" class="payer-row">
+                <div class="payer-meta">
+                  <span>{{ r.institution }}</span>
+                  <span class="muted">{{ formatRub(r.officialTotalKopecks) }}</span>
+                </div>
+                <NSelect
+                    :value="r.payerId"
+                    :options="participantSelectOptions"
+                    style="min-width: 160px; max-width: 220px"
+                    @update:value="(v: string) => changeReceiptPayer(r.id, v)"
+                />
+              </li>
+            </ul>
+            <ul class="list">
+              <li
+                  v-for="p in (state?.participants ?? []).filter((x) => x.id !== state?.me?.participantId)"
+                  :key="p.id"
+              >
+                {{ p.name }}
+                <NButton size="small" quaternary type="error" @click="removeParticipant(p.id)">Удалить</NButton>
+              </li>
+            </ul>
+            <NButton type="error" ghost @click="finishTrip">Завершить поездку</NButton>
+          </template>
         </div>
       </NTabPane>
     </NTabs>
@@ -637,6 +677,32 @@ code {
 .list li {
   padding: 0.6rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.admin-section-title {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.payer-list {
+  margin-bottom: 1.25rem;
+}
+
+.payer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.payer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
 
 .badge {

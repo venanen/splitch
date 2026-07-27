@@ -6,6 +6,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:5173',
     trace: 'on-first-retry',
+    /** PWA SW перехватывает /api и ломает page.route моки */
+    serviceWorkers: 'block',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

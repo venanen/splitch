@@ -15,33 +15,12 @@ import { sendChequeRequest } from '../lib/request-for-check.js';
 import { randomSlug } from '../slug.js';
 import { broadcastTrip } from '../realtime.js';
 import { computeMatrixForTrip } from '../services/settlement-from-db.js';
+import {
+  expandPositionsFromReceipt,
+  rubToKopecks,
+} from '../lib/expand-positions.js';
 
 const COOKIE = 'splich_session';
-
-function rubToKopecks(r: number): number {
-  return Math.round(r * 100);
-}
-
-/** Разбивает позицию чека на единицы: по строке на каждую единицу количества. */
-function expandPositionsFromReceipt(pos: {
-  name: string;
-  price: number;
-  quantity: number;
-  total: number;
-}): { name: string; priceKopecks: number }[] {
-  const n = Math.max(1, Math.floor(pos.quantity));
-  const totalK = rubToKopecks(pos.total);
-  const perUnit = Math.floor(totalK / n);
-  const rem = totalK - perUnit * n;
-  const out: { name: string; priceKopecks: number }[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push({
-      name: pos.name,
-      priceKopecks: perUnit + (i < rem ? 1 : 0),
-    });
-  }
-  return out;
-}
 
 async function findTripBySlug(slug: string) {
   const rows = await db.select().from(trips).where(eq(trips.slug, slug)).limit(1);

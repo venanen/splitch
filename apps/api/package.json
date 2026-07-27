@@ -7,7 +7,9 @@
     "dev": "bun --env-file=../../.env --watch src/index.ts",
     "start": "bun src/index.ts",
     "db:push": "drizzle-kit push",
-    "test": "vitest run",
+    "test": "vitest run && bun test src/routes/api.integration.test.ts",
+    "test:unit": "vitest run",
+    "test:integration": "bun test src/routes/api.integration.test.ts",
     "build": "bun build src/index.ts --outdir=dist --target=bun"
   },
   "dependencies": {

@@ -3,11 +3,24 @@ import type {
   ChequeData,
 } from '../../../../packages/types/src/index.js';
 
+type ChequeRequestFn = (data: ChequeData) => Promise<ApiResponse>;
+
+/** Подмена для integration-тестов (не ходим во внешний сервис). */
+let chequeRequestOverride: ChequeRequestFn | null = null;
+
+export function setChequeRequestOverride(fn: ChequeRequestFn | null): void {
+  chequeRequestOverride = fn;
+}
+
 /**
  * Запрос HTML чека у внешнего сервиса проверки.
  * URL задаётся через CHECK_VERIFY_URL (например https://proverka-cheka.online/process.php).
  */
 export async function sendChequeRequest(data: ChequeData): Promise<ApiResponse> {
+  if (chequeRequestOverride) {
+    return chequeRequestOverride(data);
+  }
+
   const endpoint =
     process.env.CHECK_VERIFY_URL ?? 'https://proverka-cheka.online/process.php';
   const boundary = '----WebKitFormBoundaryGjANwe9elEkXYd58';
